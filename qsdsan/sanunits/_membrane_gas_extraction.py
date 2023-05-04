@@ -41,8 +41,8 @@ class GasExtractionMembrane(SanUnit):
         The number of fibers in the membrane.  
     ShellDia : float
         The diameter of the shell [m]. 
-    SurfArea : float
-        Surface area of membrane [m^2]. 
+    Length : float
+        Effective length of membrane [m]. 
     GasID : array
         Array containing IDs of gases to be extracted. 
     PVac : float
@@ -92,9 +92,9 @@ class GasExtractionMembrane(SanUnit):
         }
     
     _WilkeChang = {
-        'H2': 9.84, 
-        'O2': 1.90,
-        'N2': 1.77, 
+        'H2': 10, 
+        'O2': 1.49,
+        'N2': 2.27, 
         'CO2': 2.6, 
         'CH4': 2.2, 
         'H2O': 1
@@ -103,7 +103,7 @@ class GasExtractionMembrane(SanUnit):
     # Constructor: Initialize the instance variables
     def __init__(self, ID='GEM', ins=None, outs=(), thermo=None, isdynamic=True, 
                   init_with='WasteStream', F_BM_default=None,   FiberID=190e-6, 
-                  FiberOD=300e-6, NumTubes=1512, ShellDia=1.89e-2, SurfArea=0.1199,   
+                  FiberOD=300e-6, NumTubes=1512, ShellDia=1.89e-2, Length=0.084,   
                   GasID = ['H2', 'O2', 'N2', 'CO2', 'CH4', 'H2O'], PVac = 97.325, 
                   segs = 50, GasPerm = {}, HenryPreFac = {}, HenrySlope = {}, 
                   WilkeChang = {}):
@@ -115,7 +115,7 @@ class GasExtractionMembrane(SanUnit):
         self.MemThick = (FiberOD - FiberID)/2 # Membrane Thickness [m]
         self.NumTubes = NumTubes      # Number of Tubes []
         self.ShellDia = ShellDia      # Shell Diameter [m]
-        self.SurfArea = SurfArea      # Surface Area [m^2]
+        self.Length = Length          # Effective Length [m]
         self.GasID = GasID            # IDs of gas used in the process
         self.PVac = PVac              # Operating Vacuum Pressure [-kPa]
         self.segs = segs              # Number of segments 
@@ -190,15 +190,15 @@ class GasExtractionMembrane(SanUnit):
             raise ValueError('Diameter of the shell expected from user')
             
     @property 
-    def SurfArea(self):
-        return self._SurfArea
+    def Length(self):
+        return self._Length
         
-    @SurfArea.setter
-    def SurfArea(self, SurfArea):
-        if SurfArea is not None:
-            self._SurfArea = SurfArea
+    @Length.setter
+    def Length(self, Length):
+        if Length is not None:
+            self._Length = Length
         else:
-            raise ValueError('Surface Area of Membrane expected from user')
+            raise ValueError('Length of Membrane expected from user')
         
     # Calculate the volume fraction of the lumen to the shell. 
     @property
@@ -207,12 +207,10 @@ class GasExtractionMembrane(SanUnit):
         shellVol = (np.pi*((self.ShellDia/2)**2)) - self.NumTubes*np.pi*((self.FiberOD/2)**2)
         return lumenVol/shellVol
 
-    # Calculate the effective length of the membrane by taking the ratio of the 
-    # declared surface area, and dividing it by the area per length of the tube. 
+    # Calculate the Surface Area of the membrane 
     @property
-    def Length(self):
-        memSurf = self.NumTubes*np.pi*self.FiberOD
-        return self.SurfArea/memSurf
+    def SurfArea(self):
+        return self.NumTubes*np.pi*self.FiberOD*self.Length
 
     # Determine the Shell cross-sectional area
     @property
@@ -231,6 +229,7 @@ class GasExtractionMembrane(SanUnit):
         inf, = self.ins
         cmps = inf.components
         self._Vc = np.array([cmp.Vc for cmp in cmps])
+        #print('Vc:', self._Vc)
         Phi = self._wc # Wilke Chang Correlation Factor 
         
         # Define the constant properties of gas
@@ -271,16 +270,9 @@ class GasExtractionMembrane(SanUnit):
             attr[idxr(k)] = v
             
     def _init_state(self):
-        # inf, = self.ins
-        # cmps = inf.components
-        # C = self._ins_QC[0,:-1]/cmps.chem_MW*cmps.i_mass
-        # Cs = C[self.idx] #idx selects only gases 
-        # Seg = self.segs
+
         numGas = len(self.GasID)
-        # self._state = np.zeros(2*Seg*numGas)
-        # for i in range(0, 2*Seg*numGas, 2*numGas):
-        #     for j in range(numGas):
-        #         self._state[j+i] = Cs[j]
+
         seg_i = np.zeros(2*numGas)
         seg_i[:numGas] = self._ins_QC[0,self.idx]*self.gas_mass2mol
         self._state = np.tile(seg_i, self.segs)
@@ -304,26 +296,10 @@ class GasExtractionMembrane(SanUnit):
         liq.state[:] = inf.state
         liq.state[idx] = y[-2*numGas: -numGas]/mass2mol
         
+        C_in = inf.state[idx] * mass2mol  # mol/m^3
         gas.state[-1] = 1
-        gas.state[idx] = (y[:numGas] - y[-2*numGas: -numGas])/mass2mol * liq.state[-1]
+        gas.state[idx] = (C_in - y[-2*numGas: -numGas])/mass2mol * liq.state[-1]
         
-        # The of the effluent gas in extraction membrane is the difference 
-        # between lumen concentration in the last and first segment
-        #!!! why? It seems this only holds when the unit is at steady state
-        # gas_state_in_unit = y[:numGas] - y[-2*numGas: -numGas]  # in mol/m3
-        # Molar_flow_gases = self._ins_QC[0,-1]*gas_state_in_unit # (m3/day)*(mol/m3) = mol/day
-        # Mass_flow_gases = Molar_flow_gases*cmps.chem_MW[idx] #(mol/day)*(g/mol) = (g/day)
-        
-        # self._outs[0].state[idx] =  Mass_flow_gases # (g/day)
-        # self._outs[0].state[-1] = 1 #(So the mutiplication with Q would give out g/day values)
-        
-        # # The state of effluent Liquid stream is simply the concentration of 
-        # # the last lumen segment in the extraction membrane 
-        # liquid_state_in_unit = y[-2*numGas: -numGas]  # in mol/m3
-        # liquid_state_in_unit = (liquid_state_in_unit*cmps.chem_MW[idx])/cmps.i_mass[idx] # (mol/m3)*(g/mol) = g/m3 = mg/l
-        
-        # self._outs[1].state[:] = self._ins_QC[0]
-        # self._outs[1].state[idx] = liquid_state_in_unit
         
         
     def _update_dstate(self):        
@@ -332,6 +308,7 @@ class GasExtractionMembrane(SanUnit):
         numGas = len(self.GasID)
         mass2mol = self.gas_mass2mol
         idx = self.idx
+        y = self._state
         dy = self._dstate
         
         if gas.dstate is None:
@@ -342,27 +319,11 @@ class GasExtractionMembrane(SanUnit):
         liq.dstate[:] = inf.dstate
         liq.dstate[idx] = dy[-2*numGas: -numGas]/mass2mol
         
-        #!!! this is probably wrong
-        gas.dstate[idx] = (dy[:numGas] - dy[-2*numGas: -numGas])/mass2mol * liq.dstate[-1]
+        # Changed to be the derivative of gas.state
+        dC_in = inf.dstate[idx] * mass2mol  # mol/m^3
+        gas.dstate[idx] = (dC_in - dy[-2*numGas: -numGas])/mass2mol * liq.state[-1] + (dC_in - y[-2*numGas: -numGas])/mass2mol * liq.dstate[-1]
         
-        # self._outs[0].dstate = np.zeros(len(cmps) + 1)
-        # # The of the effluent gas in extraction membrane is the difference 
-        # # between lumen concentration in the last and first segment
-        # gas_dstate_in_unit =  self._dstate[ :numGas] - self._dstate[ -2*numGas: -numGas]# in mol/m3
-        # Molar_dflow_gases = self._ins_dQC[0,-1]*gas_dstate_in_unit # (m3/day)*(mol/m3) = mol/day
-        # Mass_dflow_gases = Molar_dflow_gases*cmps.chem_MW[self.idx] #(mol/day)*(g/mol) = (g/day)
-        
-        # self._outs[0].dstate[idx] =  Mass_dflow_gases # (g/day)
-        # self._outs[0].dstate[-1] = 0 # Just differentiating constant 1 to 0 
-        
-        # self._outs[1].dstate = np.zeros(len(cmps) + 1)
-        # # The state of effluent Liquid stream is simply the concentration of 
-        # # the last lumen segment in the extraction membrane 
-        # liquid_dstate_in_unit = self._dstate[-2*numGas: -numGas]  # in mol/m3
-        # liquid_dstate_in_unit = (liquid_dstate_in_unit*cmps.chem_MW[self.idx])/cmps.i_mass[self.idx] # (mol/m3)*(g/mol) = g/m3 = mg/l
-        
-        # self._outs[1].dstate = self._ins_dQC[0]
-        # self._outs[1].dstate[idx] = liquid_dstate_in_unit
+
 
     def _run(self):
         s_in, = self.ins
@@ -383,7 +344,7 @@ class GasExtractionMembrane(SanUnit):
         # Extract Operating Parameters from ExpCond
         # Q = self.ins[0].F_vol  # Volumetric Flowrate [m3/sec]
         T = self.ins[0].T  # Temperature [K]
-        P = self.PVac*1000 # Vacuum Pressure [Pa]
+        P = 101325 - self.PVac*1000 # Vacuum Pressure [Pa]
         #V = self.Volume  # Volume of the Batch Tank [L]
 
         idx = self.idx
@@ -402,7 +363,7 @@ class GasExtractionMembrane(SanUnit):
         l = self.MemThick           # Membrane Thickness [m]
         num_tubes = self.NumTubes   # Number of Tubes in the Module []
         L = self.Length             # Membrane Length [m]
-        Segs = self.segs        # Number of segments? Ask Ian
+        Segs = self.segs            # Number of segments?
         vFrac = self.VolFrac        # Lumen/Shell Volume Fraction [m^3/m^3]
 
         # Pre-allocate vectors for gas thermophysical properties
@@ -435,49 +396,30 @@ class GasExtractionMembrane(SanUnit):
         rho = (-13.851 + 0.64038*T - 1.9124e-3*T**2 + 1.8211e-6*T**3)*18   # Liquid Density of Water [kg/m^3] from DIPPR
         nu = mu/rho # Kinematic Viscosity of Water [m^2/s]
 
-        #!!! These variables should be calculated within ODE because it is 
-        #!!! dependent on the influent Q, which could change during simulation
-        #!!! unless we can assume this change is negligible
-        
-        # # Calculate the dimensionless numbers
-        # # Reynolds
-        # Re = u*D/nu
+        # Most mass transfer coefficients need to be calculated within the ODE # since it is dependent on the flow. The exception is the Schmidt
+        # number and the membrane mass transfer resistance. 
         # Schmidt
         Sc = nu/Diff
-        # # Sherwood
-        # Sh = 1.615*(Re*Sc*D/L)**(1/3)
-        
-        # # Calculate Mass Transfer Coefficients
         KMem = Perm_SI/l
-        # KLiq = Sh*Diff/D
-        # KTot = 1/(1/KLiq + 1/(KMem*H))
-        # # for j in range(0, numGas):
-        # #     #if GasVec[j].Name == 'H2O':
-        # #     if j == self.h2o_j:
-        # #         KTot[j] = KMem[j]
-        # #!!! alternatively
-        # KTot[self.h2o_j] = KMem[self.h2o_j]
         
-        # Initialize
-        # C = self._state
         dC_lumen = np.zeros((Segs, numGas))
         dC_shell = dC_lumen.copy()
 
         sumCp_init = P/(R*T)
-        # sumCp_fin = np.zeros(Segs)
-        
-        # C = self._ins_QC[0,:-1]/cmps.chem_MW*cmps.i_mass # conc. in mol/m^3 as defined by Ian 
-        # Cs = C[self.idx] #self.idx ensures its only for gases 
         
         dC = self._dstate
         _update_dstate = self._update_dstate
-
             
         def dy_dt(t, QC_ins, QC, dQC_ins):
-            # QC is exactly 'the state' as we define in _init_
-            # C = QC
+            
+            # The current flowrate is the flowrate of the incoming flow.
             Q = QC_ins[0,-1]/24/3600
+
+            # The concentration fo gases coming in is calculated from 
+            # the concentration of gases in the influent
             C_in = QC_ins[0, idx] * mass2mol  # mol/m^3
+
+            # Linear Flow Velocity
             u = Q/cross_section_A
             
             # Calculate the dimensionless numbers
@@ -490,77 +432,29 @@ class GasExtractionMembrane(SanUnit):
             KLiq = Sh*Diff/D
             KTot = 1/(1/KLiq + 1/(KMem*H))
             KTot[h2o_j] = KMem[h2o_j]
-            
+
+            # Re-shape the state vector QC to allow for more efficient vector manipulation.
             QC = QC.reshape((Segs, numGas*2))
             C_lumen = QC[:,:numGas]
             C_shell = QC[:,numGas:]
-            #!!! alternatively
-            
-            # # For the first segment:
-            # for j in range(0, numGas):
-            #     #if GasVec[j].Name == 'H2O':
-            #     if j == h2o_j:
-            #         dC[j+numGas] = (KTot[j]/(D/4))*(PVapH2O- (C[j+numGas]/sumCp_init)*P)*vFrac
-            #         dC[j] = 0
-            #     else:
-            #         # dC[j] = (u/dx)*(Cs[j] - C[j]) - (KTot[j]/(D/4))*(C[j] - (C[j+numGas]/sumCp_init)*P/H[j])
-            #         #!!! It seems like Cs should be the dissolved gas concentration in influent
-            #         dC[j] = (u/dx)*(C_in[j] - C[j]) - (KTot[j]/(D/4))*(C[j] - (C[j+numGas]/sumCp_init)*P/H[j])
-            #         dC[j+numGas] = (KTot[j]/(D/4))*(C[j]-(C[j+numGas]/sumCp_init)*P/H[j])*vFrac
 
-            #     # Calculate the total gas concentration in the shell after the change
-            #     sumCp_fin[0] += C[j+numGas] + dC[j+numGas]
-            
+            # Calculate Trans-Membrane Pressure for each Segment            
             transmembrane = (KTot/(D/4))*(C_lumen - C_shell/sumCp_init*P/H)
+
+            # Calculate the change in the lumen and shell concentrations
             dC_lumen[0] = (u/dx)*(C_in - C_lumen[0]) - transmembrane[0]            
             dC_lumen[1:] = (u/dx)*(C_lumen[:-1] - C_lumen[1:]) - transmembrane[1:]
             dC_lumen[:,h2o_j] = 0
             dC_shell[:] = transmembrane*vFrac
             dC_shell[:,h2o_j] = (KTot[h2o_j]/(D/4))*(PVapH2O - (C_shell[:,h2o_j]/sumCp_init)*P)*vFrac
-            
-            # sumCp_fin = np.sum(C_shell+dC_shell, axis=1)
-            
-
-            # for i in range(1,Segs):
-            #     # For the remaining segments:
-            #     # Calculate the rate of change of the shell and lumen for all remaining segments.
-            #     for j in range(0, numGas):
-                    
-            #         # Lumen
-            #         dC[numVec*(i)+j] =  (u/dx)*(C[numVec*(i-1)+j] - C[numVec*(i)+j]) - (KTot[j]/(D/4))*(C[numVec*(i)+j] - (C[numVec*(i)+j+numGas]/sumCp_init)*(P/H[j]))
-
-            #         # Shell
-            #         dC[numVec*(i)+j+numGas] = (KTot[j]/(D/4))*(C[numVec*(i)+j] - (C[numVec*(i)+j+numGas]/sumCp_init)*(P/H[j]))*vFrac
-                    
-            #         # If the gas is H2O, then it follows a different formula:
-            #         #if GasVec[j].Name == 'H2O':
-            #         if j == self.h2o_j:
-            #             dC[numVec*i+j+numGas] = (KTot[j]/(D/4))*(PVapH2O-(C[numVec*i+j+numGas]/sumCp_init)*P)*vFrac
-            #             dC[numVec*i+j] = 0
-
-            #         # Calculate the total gas concentration in the shell after the change
-            #         sumCp_fin[i] += C[numVec*(i)+j+numGas] + dC[numVec*(i)+j+numGas]
                     
             # Re-scale the shell concentration so that vacuum pressure stays constant during the entire process. Given the change of concentration that we have calculated above for the shell, we can re-scale the shell concentrations with the sumCp at each segment. 
-                
-            # This FOR LOOP maintains consistent pressure in the shell
-            # for i in range(0, Segs):
-            #     for j in range(0, numGas):
-            #         # Calculate the new concentration of gases in the shell
-            #         newCp = (C[numVec*(i)+j+numGas] + dC[numVec*(i)+j+numGas])
-                    
-            #         # Re-scale the concentration to vacuum pressure
-            #         newCp = (newCp/sumCp_fin[i])*P/(R*T)
-                    
-            #         # Calculate the actual difference of concentration that the function will output
-            #         dC[numVec*(i)+j+numGas] = newCp- C[numVec*(i)+j+numGas]
-            #         # Return the difference in concentration
-                    
-            #         #return dC
             
             new_C_shell = C_shell + dC_shell
             sumCp_fin = np.sum(new_C_shell, axis=1)
             dC_shell[:] = np.diag(sumCp_init/sumCp_fin) @ new_C_shell - C_shell
             dC[:] = np.hstack((dC_lumen, dC_shell)).flatten()
+
+            # Update dstate
             _update_dstate()
         self._ODE = dy_dt
