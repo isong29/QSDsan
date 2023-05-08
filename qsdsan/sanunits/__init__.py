@@ -44,7 +44,7 @@ from ._electrochemical_cell import *
 from ._excretion import *
 from ._heat_exchanging import *
 from ._junction import *
-from ._membrane_gas_extraction import *
+#from ._membrane_gas_extraction import *
 from ._non_reactive import *
 from ._pumping import *
 from ._reactor import *
@@ -100,7 +100,7 @@ from . import (
         _junction,
         _lagoon,
         _membrane_bioreactors,
-        _membrane_gas_extraction,
+        #_membrane_gas_extraction,
         _membrane_distillation,
         _non_reactive,
         _polishing_filter,
@@ -166,5 +166,5 @@ __all__ = (
         *_reclaimer.__all__,
         *_eco_san.__all__,
         *_sludge_treatment.__all__,
-        *_membrane_gas_extraction.__all__,
+        #*_membrane_gas_extraction.__all__,
         )
